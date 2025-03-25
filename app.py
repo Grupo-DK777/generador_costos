@@ -8,6 +8,10 @@ import os  # Para manejar rutas de archivos en el sistema
 app = Flask(__name__)
 app.secret_key = 'supersecreto'  # Clave secreta para manejar sesiones en Flask
 
+# Configuración de carpetas estáticas
+app.static_folder = 'static'
+app.template_folder = 'templates'
+
 # ----------------------------- FUNCION PARA GENERAR COMBOS -----------------------------
 
 def generar_combos(cantidad, plataformas_seleccionadas, nombre_base, plataforma_inicio, plataforma_fin, costos=None):
@@ -27,11 +31,14 @@ def generar_combos(cantidad, plataformas_seleccionadas, nombre_base, plataforma_
     """
 
     # Si no se proporciona el diccionario de costos, se inicializa vacío
-    if costos is None:
+    if costos is None:  # Reescribimos esta línea para evitar errores de codificación
         costos = {}
 
     # Lista donde se almacenarán los combos generados
     combos = []
+
+    # Usamos un conjunto para garantizar que los combos sean únicos
+    combos_generados = set()
 
     # Intentamos extraer el número de plataformas desde el nombre del combo
     try:
@@ -43,7 +50,11 @@ def generar_combos(cantidad, plataformas_seleccionadas, nombre_base, plataforma_
     num_plataformas = max(1, min(num_plataformas, len(plataformas_seleccionadas) - 1))
 
     # Generamos los combos según la cantidad solicitada
-    for i in range(1, cantidad + 1):
+    intentos = 0  # Contador de intentos para evitar bucles infinitos
+    max_intentos = cantidad * 10  # Límite de intentos razonable
+
+    while len(combos) < cantidad and intentos < max_intentos:
+        intentos += 1  # Incrementamos el contador de intentos
         combo = []  # Lista donde se almacenará el combo actual
         
         # Si se seleccionó una plataforma inicial, la agregamos al combo
@@ -59,29 +70,41 @@ def generar_combos(cantidad, plataformas_seleccionadas, nombre_base, plataforma_
         while len(combo) < num_plataformas:
             faltantes = [p for p in seleccionables if p not in combo]
             if not faltantes:
-                break  # Si no quedan más plataformas disponibles, terminamos
-            combo.append(random.choice(faltantes))  # Agregar una plataforma aleatoria faltante
+                break
+            combo.append(random.choice(faltantes))
 
         # Si hay una plataforma final seleccionada, se agrega al combo
         if plataforma_fin in plataformas_seleccionadas:
             combo.append(plataforma_fin)
 
-        # Calcular el costo total sumando los valores de las plataformas en el combo
-        try:
-            costo_total = sum(costos[p] for p in combo if p in costos)
-        except KeyError as e:
-            print(f"Error: La plataforma {e} no tiene un costo definido.")
-            costo_total = 0
+        # Ordenar el combo para evitar duplicados con diferente orden
+        combo = sorted(combo)
 
-        # Redondear el costo total
-        costo_total = round(costo_total)
+        # Convertir el combo en una cadena para verificar unicidad
+        combo_str = " + ".join(combo)
 
-        # Formatear el nombre y descripción del combo
-        nombre_combo = f"{nombre_base} #{i}"
-        descripcion = " + ".join(combo)
+        # Verificar si el combo ya existe
+        if combo_str not in combos_generados:
+            combos_generados.add(combo_str)  # Agregar el combo al conjunto
 
-        # Agregar el combo generado a la lista
-        combos.append((nombre_combo, descripcion, costo_total))
+            # Calcular el costo total sumando los valores de las plataformas en el combo
+            try:
+                costo_total = sum(costos[p] for p in combo if p in costos)
+            except KeyError as e:
+                print(f"Error: La plataforma {e} no tiene un costo definido.")
+                costo_total = 0
+
+            # Redondear el costo total
+            costo_total = round(costo_total)
+
+            # Formatear el nombre y descripción del combo
+            nombre_combo = f"{nombre_base} #{len(combos) + 1}"
+
+            # Agregar el combo generado a la lista
+            combos.append((nombre_combo, combo_str, costo_total))
+
+    if intentos >= max_intentos:
+        print("Advertencia: No se pudieron generar suficientes combos únicos dentro del límite de intentos.")
 
     return combos
 
@@ -102,34 +125,52 @@ plataformas_disponibles = {
 def index():
     """
     Ruta principal que maneja la generación de combos.
-
-    - Si la solicitud es POST, se generan nuevos combos basados en la selección del usuario.
-    - Si la solicitud es GET, simplemente se renderiza la página con una lista vacía de combos.
     """
-    combos = None
+    plataformas = list(plataformas_disponibles.keys())  # Obtener las plataformas del diccionario
+    combos = []  # Inicializamos combos como una lista vacía
+
     if request.method == 'POST':
-        # Obtener los datos del formulario
-        total_combos = int(request.form['total_combos'])
-        nombre_base = request.form['nombre_base']
-        plataforma_inicio = request.form.get('plataforma_inicio', '')
-        plataforma_fin = request.form['plataforma_fin']
-        plataformas_seleccionadas = request.form.getlist('plataformas')
+        # Depuración: Imprimir los datos recibidos del formulario
+        print("Datos recibidos del formulario:")
+        print(request.form)
 
-        # Generar los combos
-        combos_generados = generar_combos(total_combos, plataformas_seleccionadas, nombre_base, plataforma_inicio, plataforma_fin, costos=plataformas_disponibles)
+        try:
+            total_combos = int(request.form.get('total_combos', 0))
+            nombre_base = request.form.get('nombre_base', 'Combo')
+            plataforma_inicio = request.form.get('plataforma_inicio', None)
+            plataforma_fin = request.form.get('plataforma_fin', None)
+            plataformas_seleccionadas = request.form.getlist('plataformas')
 
-        # Guardar los combos generados en la sesión
-        session['combos'] = combos_generados
+            # Depuración: Verificar los valores procesados
+            print(f"Total combos: {total_combos}")
+            print(f"Nombre base: {nombre_base}")
+            print(f"Plataforma inicio: {plataforma_inicio}")
+            print(f"Plataforma fin: {plataforma_fin}")
+            print(f"Plataformas seleccionadas: {plataformas_seleccionadas}")
 
-        return render_template('index.html', plataformas=plataformas_disponibles.keys(), combos=combos_generados)
-    
-    if combos is None:
-        combos = []
+            # Validar que se hayan seleccionado plataformas
+            if not plataformas_seleccionadas:
+                raise ValueError("No se seleccionaron plataformas.")
 
-    # Si es una solicitud GET, limpiar la sesión para borrar los combos anteriores
-    session.pop('combos', None)
+            # Lógica para generar combos
+            combos = generar_combos(
+                cantidad=total_combos,
+                plataformas_seleccionadas=plataformas_seleccionadas,
+                nombre_base=nombre_base,
+                plataforma_inicio=plataforma_inicio,
+                plataforma_fin=plataforma_fin,
+                costos=plataformas_disponibles
+            )
 
-    return render_template('index.html', plataformas=plataformas_disponibles.keys(), combos=combos)
+            # Depuración: Verificar los combos generados
+            print("Combos generados:")
+            print(combos)
+
+        except Exception as e:
+            # Depuración: Imprimir el error si ocurre
+            print(f"Error al generar combos: {e}")
+
+    return render_template('index.html', plataformas=plataformas, combos=combos)
 
 @app.route('/export_to_excel', methods=['POST'])
 def export_to_excel():

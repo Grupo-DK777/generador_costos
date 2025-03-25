@@ -12,7 +12,7 @@ COMBOS_FILE = 'combos.json'
 def load_combos():
     if os.path.exists(COMBOS_FILE):
         with open(COMBOS_FILE, 'r') as file:
-            return set(json.load(file))
+            return set(tuple(combo) for combo in json.load(file))
     return set()
 
 # Guardar combinaciones en el archivo
